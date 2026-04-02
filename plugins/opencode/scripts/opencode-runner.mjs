@@ -744,6 +744,185 @@ async function handleOrchestrate(flags, positional) {
   output(result.output);
 }
 
+// ─── Execute (smart auto-router) ──────────────────────────────────────
+
+/**
+ * Classify task complexity with fast heuristics (no API call).
+ * Returns { mode, reason, agentCount, modelTier }
+ */
+function classifyTask(task) {
+  const lower = task.toLowerCase();
+  const wordCount = task.split(/\s+/).length;
+
+  // Keywords that signal multi-agent work
+  const multiSignals = [
+    "security and performance", "security, performance",
+    "architecture and", "review and plan",
+    "analyze everything", "full audit", "full review",
+    "compare", "pros and cons", "tradeoffs",
+    "multiple perspectives", "cross-check",
+    "end to end", "end-to-end", "comprehensive",
+  ];
+  const heavySignals = [
+    "security audit", "vulnerability", "penetration",
+    "architecture review", "system design", "migration plan",
+    "refactor strategy", "debug.*complex", "root cause",
+  ];
+  const lightSignals = [
+    "what does", "what is", "how does", "explain",
+    "simple", "quick", "short", "one line",
+    "fix this", "typo", "rename",
+  ];
+
+  const hasMulti = multiSignals.some((s) => lower.includes(s));
+  const hasHeavy = heavySignals.some((s) => new RegExp(s).test(lower));
+  const hasLight = lightSignals.some((s) => lower.includes(s));
+
+  if (hasMulti || (wordCount > 40 && hasHeavy)) {
+    return {
+      mode: "orchestrate",
+      reason: "Multi-faceted task — multiple agents recommended",
+      agentCount: "2-4",
+      modelTier: "mixed",
+    };
+  }
+
+  if (hasHeavy || wordCount > 30) {
+    return {
+      mode: "single-heavy",
+      reason: "Complex task — single agent with powerful model",
+      agentCount: "1",
+      modelTier: "heavy",
+    };
+  }
+
+  if (hasLight || wordCount < 15) {
+    return {
+      mode: "single-fast",
+      reason: "Simple task — single fast agent",
+      agentCount: "1",
+      modelTier: "light",
+    };
+  }
+
+  return {
+    mode: "single-default",
+    reason: "Standard task — single agent with default model",
+    agentCount: "1",
+    modelTier: "medium",
+  };
+}
+
+async function handleExecute(flags, positional) {
+  const task = positional.join(" ") || flags.prompt;
+  if (!task) {
+    output("Error: No task provided. Usage: /opencode:execute <what you need>\n");
+    process.exit(1);
+  }
+
+  const config = getConfig(CWD);
+  const classification = classifyTask(task);
+
+  // ── Show recommendation ──
+  const modeLabels = {
+    "orchestrate": `${C.magenta}${C.bold} MULTI-AGENT ${C.reset}`,
+    "single-heavy": `${C.yellow}${C.bold} DEEP ANALYSIS ${C.reset}`,
+    "single-default": `${C.cyan}${C.bold} STANDARD ${C.reset}`,
+    "single-fast": `${C.green}${C.bold} QUICK ${C.reset}`,
+  };
+
+  process.stderr.write(`\n`);
+  process.stderr.write(`${C.dim}┌─${C.reset} ${C.bold}opencode:execute${C.reset} ${C.dim}────────────────────────────${C.reset}\n`);
+  process.stderr.write(`${C.dim}│${C.reset}\n`);
+  process.stderr.write(`${C.dim}│${C.reset}  ${modeLabels[classification.mode]} ${C.dim}recommended${C.reset}\n`);
+  process.stderr.write(`${C.dim}│${C.reset}  ${classification.reason}\n`);
+  process.stderr.write(`${C.dim}│${C.reset}  Agents: ${classification.agentCount} · Tier: ${classification.modelTier}\n`);
+  process.stderr.write(`${C.dim}│${C.reset}\n`);
+  process.stderr.write(`${C.dim}└─────────────────────────────────────────────${C.reset}\n`);
+  process.stderr.write(`\n`);
+
+  // ── Route to the right handler ──
+  if (classification.mode === "orchestrate") {
+    return handleOrchestrate(flags, positional);
+  }
+
+  // Single agent — pick model based on tier
+  const available = config.availableModels ?? [];
+  let model;
+
+  if (flags.model) {
+    model = flags.model;
+  } else if (classification.modelTier === "heavy" || classification.modelTier === "critical") {
+    // Try to find a codex/strong model
+    const codex = available.find((m) => m.includes("codex") && !m.includes("mini") && !m.includes("spark"));
+    model = codex ?? (config.modelPriority ?? [])[0] ?? "minimax/MiniMax-M2.7";
+  } else if (classification.modelTier === "light") {
+    // Use fastest available
+    const fast = available.find((m) => m.includes("highspeed")) ?? available.find((m) => m.includes("free"));
+    model = fast ?? (config.modelPriority ?? [])[0] ?? "minimax/MiniMax-M2.7";
+  } else {
+    model = (config.modelPriority ?? [])[0] ?? "minimax/MiniMax-M2.7";
+  }
+
+  // ── Execute single agent ──
+  const { pickOne } = await import("./lib/names.mjs");
+  const agent = pickOne();
+  agent.model = model;
+
+  process.stderr.write(`${agentProgress(agent, `working...`)} (${model.split("/").pop()})\n`);
+
+  const template = loadPrompt("ask");
+  const finalPrompt = template
+    ? interpolate(template, { prompt: task, cwd: CWD })
+    : task;
+
+  const jobId = generateJobId();
+  upsertJob(CWD, {
+    id: jobId,
+    kind: "execute",
+    status: "running",
+    model,
+    sessionId: process.env[SESSION_ID_ENV],
+    prompt: task.slice(0, 200),
+    agent: agent.name,
+  });
+
+  const result = await executeWithRetry(finalPrompt, {
+    fallbackModels: [model, ...(config.modelPriority ?? []).filter((m) => m !== model)],
+    cwd: CWD,
+    onAttempt: (n, max, m) => {
+      if (n > 1) process.stderr.write(`${agentTag(agent)} retry ${n}/${max}... (${m.split("/").pop()})\n`);
+    },
+    onFallback: (m) => {
+      process.stderr.write(`${agentTag(agent)} switching to ${m.split("/").pop()}...\n`);
+    },
+  });
+
+  const elapsed = "done";
+  if (result.success) {
+    process.stderr.write(`${agentTag(agent)} ${C.green}done${C.reset} (${result.model.split("/").pop()})\n\n`);
+  } else {
+    process.stderr.write(`${agentTag(agent)} ${C.red}failed${C.reset}\n\n`);
+  }
+
+  upsertJob(CWD, {
+    id: jobId,
+    status: result.success ? "done" : "failed",
+    model: result.model,
+    completedAt: new Date().toISOString(),
+  });
+
+  if (result.output) writeJobFile(CWD, jobId, "output.txt", result.output);
+
+  const header = formatResultHeader(`execute · ${agent.name} (${agent.trait})`, result);
+  output(header + (result.output || "No output.\n"));
+}
+
+// For the agent name import in execute
+function agentTag(agent) {
+  return `[${agent.name}]`;
+}
+
 // ─── Main ────────────────────────────────────────────────────────────
 
 async function main() {
@@ -751,6 +930,7 @@ async function main() {
 
   switch (command) {
     case "setup":       await handleSetup(flags); break;
+    case "execute":     await handleExecute(flags, positional); break;
     case "ask":         await handleAsk(flags, positional); break;
     case "review":      await handleReview(flags); break;
     case "plan":        await handlePlan(flags, positional); break;
@@ -763,11 +943,12 @@ async function main() {
         "OpenCode Companion — Made by Alejandro Apodaca Cordova (apoapps.com)",
         "",
         "Usage:",
+        '  opencode-runner.mjs execute     "<task>"             — RECOMMENDED: auto-routes everything',
         "  opencode-runner.mjs setup       [--json]            — Detect models & configure",
-        '  opencode-runner.mjs ask         "<prompt>"           — Ask a question',
+        '  opencode-runner.mjs ask         "<prompt>"           — Simple question (single agent)',
         "  opencode-runner.mjs review      [--base <ref>]       — Review git changes",
         '  opencode-runner.mjs plan        "<prompt>"           — Implementation planning',
-        '  opencode-runner.mjs orchestrate "<complex task>"     — Multi-agent analysis',
+        '  opencode-runner.mjs orchestrate "<complex task>"     — Force multi-agent',
         "  opencode-runner.mjs models                           — List available models",
         "  opencode-runner.mjs status      [job-id] [--all]     — Check job status",
         "  opencode-runner.mjs result      [job-id]             — Get job result",

@@ -9,21 +9,41 @@
 
 ---
 
-## Why This Plugin?
+## The Problem: You Can't Use Claude Inside OpenCode
 
-Claude Code is powerful but expensive. Every token counts. This plugin lets you **delegate cheap work to cheaper models** through [OpenCode CLI](https://opencode.ai), then have Claude **validate and synthesize** the results — getting the best of both worlds.
+Anthropic's terms of service **prohibit running Claude models from within third-party coding agents** like OpenCode. You can't configure OpenCode to call Claude as its backend — it's explicitly blocked.
+
+But here's the thing: **you _can_ call OpenCode from within Claude Code.**
+
+### The Reverse Approach
+
+So I flipped it. Instead of trying to put Claude inside OpenCode (which is forbidden), this plugin puts **OpenCode inside Claude Code** as a tool Claude can call.
+
+```
+ Blocked by Anthropic:           What this plugin does:
+ OpenCode → Claude               Claude Code → OpenCode
+        ✗                               ✓
+```
+
+This way Claude stays in control, validates everything, and delegates the grunt work to whichever model you configure in OpenCode — MiniMax, Codex, GPT, Gemini, whatever you have access to. **50+ models, zero Anthropic policy violations.**
+
+### Why This Matters
+
+- **Claude Code is powerful but expensive.** Every analytical question, every code review, every planning draft burns Claude tokens at full price.
+- **Most of that work doesn't need Claude's full intelligence.** A MiniMax model can draft a code review or answer a question for a fraction of the cost.
+- **Claude adds value where it matters** — validating the output, catching hallucinations, and synthesizing results with project-specific knowledge.
 
 ### The Token-Saving Pattern
 
 ```
-Without plugin:  User → Claude (expensive) → Answer
-With plugin:     User → Claude → OpenCode (cheap) → Claude validates → Answer
-                                    ↑                      ↑
-                              Does the heavy lifting   Spends ~200 tokens
-                              (0 Claude tokens)        validating
+Without plugin:  User → Claude (expensive, full analysis) → Answer
+With plugin:     User → Claude → OpenCode (cheap draft) → Claude validates → Answer
+                                    ↑                           ↑
+                              Does the heavy lifting      Spends ~200 tokens
+                              (0 Claude tokens)           on validation only
 ```
 
-**Result:** 60-80% fewer Claude tokens for analytical tasks.
+**Result:** 60-80% fewer Claude tokens for analytical tasks. Same quality. Full compliance.
 
 ---
 
@@ -161,6 +181,8 @@ plugins/opencode/
 
 ## Why OpenCode Instead of Codex Plugin?
 
+The Codex plugin only talks to Codex models. This plugin talks to **everything** — because OpenCode CLI is a universal model gateway. You get Codex, MiniMax, GPT, Gemini, and everything else through one interface.
+
 | | OpenCode Plugin | Codex Plugin |
 |---|---|---|
 | **Models** | ALL providers (MiniMax, Codex, GPT, Gemini, 50+) | Codex only |
@@ -168,12 +190,11 @@ plugins/opencode/
 | **Fallback** | Automatic multi-model fallback | Single model |
 | **Cost** | Choose cheapest model per task | Codex pricing only |
 | **Speed** | MiniMax highspeed < 5s | Codex ~15-30s |
-| **Write access** | Read-only (safe) | Write-capable |
+| **Codex access** | Yes, via `openai/gpt-5-codex` etc. | Native |
+| **Write access** | Read-only (safe by design) | Write-capable |
 | **Thread resume** | Not supported | Supported |
 
-**Recommendation:** Use this plugin as your primary delegation tool. Fall back to Codex plugin only when you need write-capable runs or thread resume.
-
-Since OpenCode CLI includes Codex models (`openai/gpt-5-codex`, `openai/gpt-5.1-codex`, `github-copilot/gpt-5.1-codex`), you get Codex analysis through this plugin without the overhead of the Codex app-server protocol.
+**Recommendation:** Use this plugin as your primary delegation tool. It already includes Codex models (`openai/gpt-5-codex`, `openai/gpt-5.1-codex`, `github-copilot/gpt-5.1-codex`) — no separate Codex CLI needed. Fall back to the Codex plugin only when you specifically need write-capable runs or resumable threads.
 
 ---
 
@@ -308,6 +329,14 @@ Run `/opencode:setup` to reconfigure. The plugin will suggest available alternat
 
 ---
 
+## How It Came To Be
+
+I wanted Claude and other AI models to collaborate — each one doing what it's best at. The obvious approach was to run Claude from inside OpenCode, but Anthropic blocks that. So I reversed the architecture: **Claude Code calls OpenCode**, not the other way around.
+
+The result is better than the original idea. Claude stays in charge — it decides what to delegate, composes smart prompts, and validates every response. The cheaper model does the heavy lifting. You save tokens. Everybody wins.
+
+---
+
 ## License
 
 MIT
@@ -316,4 +345,4 @@ MIT
 
 **Made by [Alejandro Apodaca Cordova](https://apoapps.com)**
 
-Built to save tokens, save money, and make Claude Code even more powerful.
+Built because Anthropic said I can't use Claude inside OpenCode. So I put OpenCode inside Claude. Problem solved.

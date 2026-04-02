@@ -109,7 +109,6 @@ function runCommand(cmd, args, options = {}) {
  */
 export async function executeWithRetry(prompt, options = {}) {
   const models = options.fallbackModels ?? [options.model ?? "minimax/MiniMax-M2.7"];
-  const mode = options.mode ?? "read-only";
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   const cwd = options.cwd ?? process.cwd();
   const onAttempt = options.onAttempt ?? (() => {});
@@ -126,11 +125,9 @@ export async function executeWithRetry(prompt, options = {}) {
       onAttempt(attempt, MAX_ATTEMPTS, model);
 
       try {
-        const result = await runCommand(
-          "opencode",
-          ["exec", "-s", mode, "--model", model, prompt],
-          { timeout, cwd }
-        );
+        // opencode run --model <model> --dir <cwd> "<prompt>"
+        const args = ["run", "--model", model, "--dir", cwd, prompt];
+        const result = await runCommand("opencode", args, { timeout, cwd });
 
         return {
           success: true,

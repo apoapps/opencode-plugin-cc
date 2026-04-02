@@ -5,6 +5,26 @@
  * Made by Alejandro Apodaca Cordova (apoapps.com)
  */
 
+// ANSI colors — used only on stderr (never in stdout that Claude reads)
+const C = {
+  reset:   '\x1b[0m',
+  bold:    '\x1b[1m',
+  dim:     '\x1b[2m',
+  blue:    '\x1b[38;5;75m',
+  cyan:    '\x1b[38;5;87m',
+  green:   '\x1b[38;5;114m',
+  yellow:  '\x1b[38;5;220m',
+  magenta: '\x1b[38;5;213m',
+  orange:  '\x1b[38;5;215m',
+};
+const PALETTE = [C.blue, C.cyan, C.green, C.yellow, C.magenta, C.orange];
+
+function colorFor(name) {
+  let h = 0;
+  for (const ch of name) h = ((h << 5) - h + ch.charCodeAt(0)) | 0;
+  return PALETTE[Math.abs(h) % PALETTE.length];
+}
+
 const AGENTS = [
   // Olympians & major gods
   { name: "Artemis", trait: "precision" },
@@ -103,18 +123,26 @@ export function pickOne() {
 }
 
 /**
- * Format agent tag for progress output.
+ * Colored agent tag — for stderr only (user's terminal).
  */
 export function agentTag(agent) {
+  const c = colorFor(agent.name);
+  return `${c}${C.bold}[${agent.name}]${C.reset}`;
+}
+
+/**
+ * Plain agent tag — for stdout (what Claude reads, no ANSI waste).
+ */
+export function agentTagPlain(agent) {
   return `[${agent.name}]`;
 }
 
 /**
- * Format agent status line for live progress.
+ * Colored status line for stderr progress.
  */
 export function agentProgress(agent, message) {
-  const modelTag = agent.model ? ` (${agent.model.split("/").pop()})` : "";
-  return `${agentTag(agent)} ${message}${modelTag}`;
+  const modelPart = agent.model ? ` ${C.dim}(${agent.model.split("/").pop()})${C.reset}` : "";
+  return `${agentTag(agent)} ${message}${modelPart}`;
 }
 
 export const AGENT_POOL_SIZE = AGENTS.length;

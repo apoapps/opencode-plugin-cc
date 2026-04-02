@@ -48,6 +48,33 @@ import {
 const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const CWD = process.cwd();
 
+// ─── Terminal colors (stderr only) ───────────────────────────────────
+const C = {
+  reset:   '\x1b[0m',  bold: '\x1b[1m',  dim: '\x1b[2m',
+  green:   '\x1b[38;5;114m',  red: '\x1b[38;5;203m',
+  cyan:    '\x1b[38;5;87m',   gray: '\x1b[38;5;240m',
+  yellow:  '\x1b[38;5;220m',  magenta: '\x1b[38;5;213m',
+};
+
+// ─── Claude Code context hint ─────────────────────────────────────────
+// Tells OpenCode it's a subagent — keep responses concise for Claude's validation pass
+const CC_HINT = `[CONTEXT: You are a subagent running inside Claude Code. Claude will read and validate your response — be maximally concise. No preamble, no "here is", no filler. Jump straight to findings. Use bullet points and file:line references. 400 words max unless the task genuinely requires more.]\n\n`;
+
+// ─── Spinner helpers ──────────────────────────────────────────────────
+const SPIN_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+const SPIN_PHRASES = ['tokenizando...','chambeando...','awanta...','dale gas...','procesando...','casi casi...','en chinga...','bebiendo tokens...'];
+
+function startSpinner(tag) {
+  let s = 0, p = 0;
+  const timer = setInterval(() => {
+    const phrase = s % 18 === 0 ? SPIN_PHRASES[p++ % SPIN_PHRASES.length] : null;
+    const line = phrase ? `  ${tag} ${SPIN_FRAMES[s % 10]} ${phrase}` : `  ${tag} ${SPIN_FRAMES[s % 10]}`;
+    process.stderr.write(`\r\x1b[2K${line}`);
+    s++;
+  }, 130);
+  return () => { clearInterval(timer); process.stderr.write('\r\x1b[2K'); };
+}
+
 // ─── Argument parsing ────────────────────────────────────────────────
 
 function parseArgs(argv) {
@@ -502,9 +529,9 @@ async function handleAsk(flags, positional) {
 
   const { models, source } = await resolveActiveModel(flags);
   const template = loadPrompt("ask");
-  const finalPrompt = template
+  const finalPrompt = CC_HINT + (template
     ? interpolate(template, { prompt, cwd: CWD })
-    : prompt;
+    : prompt);
 
   const jobId = generateJobId();
   upsertJob(CWD, {
@@ -565,9 +592,9 @@ async function handleReview(flags) {
     diff ? `## Diff\n\`\`\`diff\n${diff.slice(0, 50000)}\n\`\`\`` : "",
   ].filter(Boolean).join("\n\n");
 
-  const finalPrompt = template
+  const finalPrompt = CC_HINT + (template
     ? interpolate(template, { context, cwd: CWD, base: base ?? "HEAD" })
-    : `Review this code change and report issues by severity:\n\n${context}`;
+    : `Review this code change and report issues by severity:\n\n${context}`);
 
   const jobId = generateJobId();
   upsertJob(CWD, {
@@ -608,9 +635,9 @@ async function handlePlan(flags, positional) {
 
   const { models } = await resolveActiveModel(flags);
   const template = loadPrompt("plan");
-  const finalPrompt = template
+  const finalPrompt = CC_HINT + (template
     ? interpolate(template, { prompt, cwd: CWD })
-    : `Create a detailed implementation plan for:\n\n${prompt}`;
+    : `Create a detailed implementation plan for:\n\n${prompt}`);
 
   const jobId = generateJobId();
   upsertJob(CWD, {
@@ -868,16 +895,18 @@ async function handleExecute(flags, positional) {
   }
 
   // ── Execute single agent ──
-  const { pickOne } = await import("./lib/names.mjs");
+  const { pickOne, agentTag: colorTag } = await import("./lib/names.mjs");
   const agent = pickOne();
   agent.model = model;
 
-  process.stderr.write(`${agentTag(agent)} working... (${model.split("/").pop()})\n`);
+  const tag = colorTag(agent);
+  process.stderr.write(`\n  ${tag} ${C.dim}${model.split("/").pop()}${C.reset}\n`);
+  const stopSpinner = startSpinner(tag);
 
   const template = loadPrompt("ask");
-  const finalPrompt = template
+  const finalPrompt = CC_HINT + (template
     ? interpolate(template, { prompt: task, cwd: CWD })
-    : task;
+    : task);
 
   const jobId = generateJobId();
   upsertJob(CWD, {
@@ -894,18 +923,18 @@ async function handleExecute(flags, positional) {
     fallbackModels: [model, ...(config.modelPriority ?? []).filter((m) => m !== model)],
     cwd: CWD,
     onAttempt: (n, max, m) => {
-      if (n > 1) process.stderr.write(`${agentTag(agent)} retry ${n}/${max}... (${m.split("/").pop()})\n`);
+      if (n > 1) { stopSpinner(); process.stderr.write(`  ${tag} ${C.yellow}retry ${n}/${max}${C.reset} ${C.dim}${m.split("/").pop()}${C.reset}\n`); startSpinner(tag); }
     },
     onFallback: (m) => {
-      process.stderr.write(`${agentTag(agent)} switching to ${m.split("/").pop()}...\n`);
+      stopSpinner(); process.stderr.write(`  ${tag} ${C.yellow}↪ fallback →${C.reset} ${C.dim}${m.split("/").pop()}${C.reset}\n`); startSpinner(tag);
     },
   });
 
-  const elapsed = "done";
+  stopSpinner();
   if (result.success) {
-    process.stderr.write(`${agentTag(agent)} ${C.green}done${C.reset} (${result.model.split("/").pop()})\n\n`);
+    process.stderr.write(`  ${tag} ${C.green}✓ done${C.reset} ${C.dim}(${result.model.split("/").pop()})${C.reset}\n\n`);
   } else {
-    process.stderr.write(`${agentTag(agent)} ${C.red}failed${C.reset}\n\n`);
+    process.stderr.write(`  ${tag} ${C.red}✗ failed${C.reset}\n\n`);
   }
 
   upsertJob(CWD, {
@@ -921,7 +950,7 @@ async function handleExecute(flags, positional) {
   output(header + (result.output || "No output.\n"));
 }
 
-// For the agent name import in execute
+// Plain agentTag for stdout (what Claude reads — no ANSI)
 function agentTag(agent) {
   return `[${agent.name}]`;
 }

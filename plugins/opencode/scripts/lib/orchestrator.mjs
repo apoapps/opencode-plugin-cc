@@ -9,8 +9,19 @@
  */
 
 import { executeWithRetry } from "./opencode.mjs";
-import { pickAgents, agentTag, agentProgress } from "./names.mjs";
+import { pickAgents, agentTag, agentTagPlain, agentProgress } from "./names.mjs";
 import { getConfig, upsertJob, generateJobId, writeJobFile } from "./state.mjs";
+
+// stderr colors — never touch stdout (what Claude reads)
+const C = {
+  reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
+  green: '\x1b[38;5;114m', red: '\x1b[38;5;203m',
+  cyan: '\x1b[38;5;87m',   gray: '\x1b[38;5;240m',
+  yellow: '\x1b[38;5;220m',
+};
+
+// Tells OpenCode it's a subagent inside Claude Code — keep responses concise
+const CC_HINT = `[CONTEXT: You are a subagent running inside Claude Code. Claude will read and validate your response. Be maximally concise — no preamble, no filler. Jump to findings. Bullets + file:line refs. 400 words max.]\n\n`;
 
 // ─── Complexity tiers → model mapping ────────────────────────────────
 
@@ -150,13 +161,13 @@ export async function orchestrate(task, cwd, options = {}) {
   const startTime = Date.now();
 
   // ── Phase 1: Decompose ──
-  onProgress(`\n┌─ Orchestrator ─────────────────────────────────`);
-  onProgress(`│ Analyzing task complexity...`);
+  onProgress(`\n${C.cyan}${C.bold}┌─ Orchestrator ─────────────────────────────────${C.reset}`);
+  onProgress(`${C.cyan}│${C.reset} ${C.dim}Analyzing task complexity...${C.reset}`);
 
   const subtasks = await decompose(task, cwd, config);
   const agentCount = subtasks.length;
 
-  onProgress(`│ Decomposed into ${agentCount} sub-task${agentCount > 1 ? "s" : ""}`);
+  onProgress(`${C.cyan}│${C.reset} Decomposed into ${C.bold}${agentCount}${C.reset} sub-task${agentCount > 1 ? "s" : ""}`);
 
   // ── Phase 2: Assign agents ──
   const agents = pickAgents(agentCount);
@@ -167,15 +178,15 @@ export async function orchestrate(task, cwd, options = {}) {
   }
   spreadModels(agents, config, available);
 
-  onProgress(`│`);
-  onProgress(`│ Agents assigned:`);
+  onProgress(`${C.cyan}│${C.reset}`);
+  onProgress(`${C.cyan}│${C.reset} Agents assigned:`);
   for (const a of agents) {
     const modelShort = a.model?.split("/").pop() ?? "default";
-    onProgress(`│   ${agentTag(a)} ${a.focus} (${a.complexity}) → ${modelShort}`);
+    onProgress(`${C.cyan}│${C.reset}   ${agentTag(a)} ${C.dim}${a.focus} (${a.complexity}) → ${modelShort}${C.reset}`);
   }
-  onProgress(`│`);
-  onProgress(`│ Executing ${agentCount} agent${agentCount > 1 ? "s" : ""} in parallel...`);
-  onProgress(`└────────────────────────────────────────────────`);
+  onProgress(`${C.cyan}│${C.reset}`);
+  onProgress(`${C.cyan}│${C.reset} Executing ${C.bold}${agentCount}${C.reset} agent${agentCount > 1 ? "s" : ""} in parallel...`);
+  onProgress(`${C.cyan}${C.bold}└────────────────────────────────────────────────${C.reset}`);
   onProgress(``);
 
   // ── Phase 3: Execute in parallel ──
@@ -184,7 +195,7 @@ export async function orchestrate(task, cwd, options = {}) {
     agent.startedAt = Date.now();
     onProgress(agentProgress(agent, `working on: ${agent.focus}...`));
 
-    const result = await executeWithRetry(agent.task, {
+    const result = await executeWithRetry(CC_HINT + agent.task, {
       fallbackModels: [agent.model],
       timeout: 120_000,
       cwd,
@@ -218,12 +229,12 @@ export async function orchestrate(task, cwd, options = {}) {
   const failed = completed.filter((a) => a.status === "failed").length;
 
   onProgress(``);
-  onProgress(`┌─ Results ──────────────────────────────────────`);
-  onProgress(`│ ${succeeded}/${agentCount} agents completed (${totalTime}s total)`);
+  onProgress(`${C.cyan}${C.bold}┌─ Results ──────────────────────────────────────${C.reset}`);
+  onProgress(`${C.cyan}│${C.reset} ${C.green}${succeeded}/${agentCount}${C.reset} agents completed ${C.dim}(${totalTime}s)${C.reset}`);
   if (failed > 0) {
-    onProgress(`│ ${failed} agent${failed > 1 ? "s" : ""} failed`);
+    onProgress(`${C.cyan}│${C.reset} ${C.red}${failed} failed${C.reset}`);
   }
-  onProgress(`└────────────────────────────────────────────────`);
+  onProgress(`${C.cyan}${C.bold}└────────────────────────────────────────────────${C.reset}`);
   onProgress(``);
 
   // ── Build final output ──
@@ -240,7 +251,7 @@ export async function orchestrate(task, cwd, options = {}) {
       : "?";
     const statusIcon = agent.status === "done" ? "✓" : "✗";
 
-    sections.push(`### ${agentTag(agent)} ${agent.focus} ${statusIcon}`);
+    sections.push(`### ${agentTagPlain(agent)} ${agent.focus} ${statusIcon}`);
     sections.push(`*${agent.name} (${agent.trait}) · ${modelShort} · ${agent.complexity} · ${elapsed}*`);
     sections.push(``);
 

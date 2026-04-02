@@ -869,7 +869,7 @@ async function handleExecute(flags, positional) {
   const agent = pickOne();
   agent.model = model;
 
-  process.stderr.write(`${agentProgress(agent, `working...`)} (${model.split("/").pop()})\n`);
+  process.stderr.write(`${agentTag(agent)} working... (${model.split("/").pop()})\n`);
 
   const template = loadPrompt("ask");
   const finalPrompt = template

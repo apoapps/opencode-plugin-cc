@@ -189,23 +189,7 @@ function output(value, asJson = false) {
   }
 }
 
-// ─── CLI formatting ──────────────────────────────────────────────────
-
-const C = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  green: "\x1b[32m",
-  red: "\x1b[31m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  cyan: "\x1b[36m",
-  magenta: "\x1b[35m",
-  white: "\x1b[37m",
-  bgGreen: "\x1b[42m",
-  bgRed: "\x1b[41m",
-  bgBlue: "\x1b[44m",
-};
+// ─── CLI formatting helpers ──────────────────────────────────────────
 
 function ok(text)   { return `${C.green}✓${C.reset} ${text}`; }
 function fail(text)  { return `${C.red}✗${C.reset} ${text}`; }

@@ -1011,12 +1011,15 @@ async function handleInit(flags) {
     gitHash = execSync(`git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null`, { encoding: "utf8" }).trim();
   } catch { /* no git */ }
 
-  // ── Tmux detection + oc-team split pane ──
+  // ── Tmux detection + oc-team split pane (anchored to Claude Code's pane) ──
   const inTmux = !!process.env.TMUX;
+  const ccPane = process.env.TMUX_PANE; // pane ID where Claude Code is running
   let tmuxLine = dim("not detected");
   if (inTmux) {
     try {
-      const panes = execSync("tmux list-panes -F '#{pane_title}' 2>/dev/null", { encoding: "utf8" }).trim().split("\n");
+      // List panes only in the current window (Claude Code's window)
+      const paneTarget = ccPane ? `-t ${ccPane}` : "";
+      const panes = execSync(`tmux list-panes ${paneTarget} -F '#{pane_title}' 2>/dev/null`, { encoding: "utf8" }).trim().split("\n");
       if (!panes.includes("oc-team")) {
         const stateDir = path.join(CWD, ".opencode", "state");
         const watchCmd = fs.existsSync(stateDir)
@@ -1026,7 +1029,9 @@ async function handleInit(flags) {
           `printf '\\033[1;36m  swarm-code · oc-team\\033[0m\\n\\n'`,
           watchCmd,
         ].join("; ");
-        execSync(`tmux split-window -h -d "bash -c '${paneCmd.replace(/'/g, `'"'"'`)}'" 2>/dev/null`, { encoding: "utf8" });
+        // Split within Claude Code's exact window using its pane ID
+        const splitTarget = ccPane ? `-t ${ccPane}` : "";
+        execSync(`tmux split-window -h -d ${splitTarget} "bash -c '${paneCmd.replace(/'/g, `'"'"'`)}'" 2>/dev/null`, { encoding: "utf8" });
         execSync(`tmux select-pane -T 'oc-team' -t '{right}' 2>/dev/null`, { encoding: "utf8" });
         tmuxLine = ok("`oc-team` split pane created");
       } else {

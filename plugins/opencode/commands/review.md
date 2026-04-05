@@ -1,7 +1,7 @@
 ---
 description: Run an OpenCode code review against local git state to save Claude tokens
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>]'
-allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
+argument-hint: '[--wait|--background] [--base <ref>]'
+allowed-tools: Read, Glob, Grep, Bash, AskUserQuestion
 ---
 
 <!-- Made by Alejandro Apodaca Cordova (apoapps.com) -->
@@ -26,9 +26,14 @@ Execution mode rules:
     - `Wait for results` / `Run in background`
 
 Foreground flow:
-- Run:
+- Run via bridge (tmux window, auto model):
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-runner.mjs" review $ARGUMENTS
+BRIDGE="${CLAUDE_PLUGIN_ROOT:-/Volumes/SandiskSSD/Documents/Local/dev/apoapps/cc-skills/opencode-plugin-cc/plugins/opencode}/scripts/opencode-bridge.sh"
+DIFF=$(git diff --cached; git diff)
+bash "$BRIDGE" --type review "Review this git diff for bugs, security issues, and code quality. Output findings as: - [SEVERITY] file:line — description. Severity: CRITICAL/HIGH/MEDIUM/LOW. Max 10 findings ordered by severity.
+
+## DIFF
+$DIFF"
 ```
 - Validate the output per `opencode-result-handling`:
   - Check that findings reference real files.
@@ -37,19 +42,6 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-runner.mjs" review $ARGUMENTS
 - Present findings ordered by severity.
 - Keep validation commentary under 200 tokens.
 
-Background flow:
-```typescript
-Bash({
-  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-runner.mjs" review $ARGUMENTS`,
-  description: "OpenCode review",
-  run_in_background: true
-})
-```
-- Tell user: "OpenCode review started in background. Check `/opencode:status` for progress."
+CRITICAL: After presenting review findings, STOP. Do not fix issues. Ask the user which ones to fix.
 
-CRITICAL: After presenting review findings, STOP. Do not fix any issues. Ask the user which issues they want fixed.
-
-Integration with Codex:
-- If both plugins are installed and the review is large (>20 files), suggest using `/codex:review` for deeper analysis.
-- OpenCode review is best for quick, focused reviews of small-to-medium changes.
-- Model used depends on `/opencode:setup` configuration with automatic fallback.
+Model: auto-detected. No hardcoded model names.

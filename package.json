@@ -1,7 +1,7 @@
 {
-  "name": "opencode",
+  "name": "swarm-code",
   "version": "1.0.0",
-  "description": "OpenCode plugin for Claude Code — delegate tasks to save tokens",
+  "description": "Agent swarm adapter for Claude Code + OpenCode — Claude Code leads, OpenCode executes",
   "type": "module",
   "private": true,
   "author": "Alejandro Apodaca Cordova (apoapps.com)",

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # opencode-bridge.sh — bridge entre Claude Code y OpenCode CLI
 #
-# Interfaz mínima: solo el prompt. Todo lo demás es automático.
-# - Tipo de tarea (ask/review/plan) → detectado del contenido
-# - Modelo → detectado por opencode-runner según configuración
-# - tmux window → abierta automáticamente para visibilidad
+# Interfaz mínima: solo el prompt. Todo lo demás es automático:
+# - Tipo de tarea → detectado del contenido del prompt
+# - System prompt → inyectado según tipo (basado en claude-code-sourcemap)
+# - Modelo → detectado por opencode-runner según config del proyecto
+# - tmux window → abierta automáticamente para visibilidad en tiempo real
 #
 # Made by Alejandro Apodaca Cordova (apoapps.com)
 #
 # Usage:
 #   opencode-bridge.sh "<prompt>"
-#   opencode-bridge.sh --type <ask|review|plan> "<prompt>"  # override opcional
+#   opencode-bridge.sh --type <ask|review|plan> "<prompt>"
 
 set -euo pipefail
 
@@ -34,30 +35,84 @@ if [[ -z "$PROMPT" ]]; then
   exit 2
 fi
 
-# ─── Hook: auto-detect task type ──────────────────────────────────────────────
-# Detector interno — analiza el prompt para elegir el comando correcto.
-# Override con --type si necesitas control explícito.
+# ─── Hook: auto-detect task type ─────────────────────────────────────────────
 
 detect_type() {
-  local p="$1"
   local lower
-  lower="$(echo "$p" | tr '[:upper:]' '[:lower:]')"
+  lower="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
 
-  # Review: menciona git, diff, cambios, PR
-  if echo "$lower" | grep -qE "(git diff|code review|revisa (el|los|la|las|este|estos)|review (the|these|this|my)|cambios|pull request|\bpr\b|staged|unstaged)"; then
+  if echo "$lower" | grep -qE "(git diff|code review|revisa (el|los|esta|este)|review (the|these|this|my)|cambios|pull request|\bpr\b|staged|unstaged|diff)"; then
     echo "review"; return
   fi
-
-  # Plan: arquitectura, diseño, implementación, pasos
-  if echo "$lower" | grep -qE "(plan|architect|diseña|diseño|implementa|cómo (estructurar|construir|crear|hacer)|roadmap|pasos para|step.by.step|scaffold|estructura (de|para))"; then
+  if echo "$lower" | grep -qE "(plan|architect|diseña|implementa|cómo (estructurar|construir|crear)|roadmap|pasos para|step.by.step|scaffold|estructura de)"; then
     echo "plan"; return
   fi
-
-  # Default
   echo "ask"
 }
 
 CMD="${TYPE_OVERRIDE:-$(detect_type "$PROMPT")}"
+
+# ─── Hook: system prompt injection ───────────────────────────────────────────
+# Esencia de los prompts de claude-code-sourcemap, adaptados para OpenCode.
+# Se antepone al prompt del usuario para mejorar calidad sin que el caller
+# tenga que especificar nada.
+
+inject_system_context() {
+  local cmd="$1"
+  local user_prompt="$2"
+
+  case "$cmd" in
+    plan)
+      # Basado en: claude-code-sourcemap ArchitectTool/prompt.ts
+      cat << 'SYS'
+[SYSTEM CONTEXT — software architect mode]
+Analyze the technical requirements and produce a clear, actionable implementation plan.
+The plan will be executed by a software engineer — be specific and detailed.
+Do NOT write code. Do NOT ask if you should implement changes.
+Structure your output:
+1. Core approach (1-2 sentences)
+2. Concrete steps in implementation order
+3. Key decisions and tradeoffs
+4. Files to create/modify (with paths)
+Keep under 600 words unless complexity demands more.
+
+[TASK]
+SYS
+      echo "$user_prompt"
+      ;;
+
+    review)
+      # Basado en: claude-code-sourcemap BashTool commit analysis + OpenCode review pattern
+      cat << 'SYS'
+[SYSTEM CONTEXT — code reviewer mode]
+Review the provided code/diff for bugs, security issues, and quality problems.
+Output findings ONLY in this format:
+- [SEVERITY] file:line — description
+Severity levels: CRITICAL / HIGH / MEDIUM / LOW
+Max 12 findings, ordered by severity (CRITICAL first).
+Do NOT suggest fixes. Do NOT add explanations beyond the one-line description.
+If no issues found, output: "No significant issues found."
+
+[DIFF / CODE TO REVIEW]
+SYS
+      echo "$user_prompt"
+      ;;
+
+    ask)
+      # Basado en: claude-code-sourcemap agent system prompt patterns
+      cat << 'SYS'
+[SYSTEM CONTEXT — analytical assistant mode]
+You are running as a subagent inside Claude Code. Claude will read and validate your response.
+Be maximally concise — no preamble, no "here is", no filler.
+Jump straight to findings. Use bullet points and file:line references where applicable.
+400 words max unless the task genuinely requires more.
+
+[QUESTION / TASK]
+SYS
+      echo "$user_prompt"
+      ;;
+  esac
+}
 
 # ─── Job setup ────────────────────────────────────────────────────────────────
 
@@ -69,20 +124,16 @@ SENTINEL="__OC_DONE_${JOB_ID}__"
 WINDOW_NAME="oc:${CMD}"
 MAX_WAIT=300
 
-printf '%s' "$PROMPT" > "$PROMPT_FILE"
+# Escribir prompt enriquecido (context + user prompt) al archivo
+inject_system_context "$CMD" "$PROMPT" > "$PROMPT_FILE"
 
-# ─── Hook: model selection ─────────────────────────────────────────────────────
-# El runner lee modelPriority desde la config del proyecto (.opencode/config.json
-# o config guardada con /opencode:setup). Si no hay config, usa el primer modelo
-# disponible que responda. No se hardcodean modelos aquí.
-
-# ─── Runner script (se ejecuta en tmux) ───────────────────────────────────────
+# ─── Runner script (ejecutado en tmux para visibilidad) ───────────────────────
 
 cat > "$SCRIPT_FILE" << RUNNER_EOF
 #!/usr/bin/env bash
-PROMPT_CONTENT=\$(cat "$PROMPT_FILE")
+FULL_PROMPT=\$(cat "$PROMPT_FILE")
 echo ""
-node "$RUNNER" $CMD "\$PROMPT_CONTENT" 2>&1 | tee "$OUTFILE"
+node "$RUNNER" $CMD "\$FULL_PROMPT" 2>&1 | tee "$OUTFILE"
 echo ""
 echo "$SENTINEL" >> "$OUTFILE"
 printf "\n─────────────────────────────────────\n"
@@ -91,8 +142,7 @@ read
 RUNNER_EOF
 chmod +x "$SCRIPT_FILE"
 
-# ─── Hook: launch ─────────────────────────────────────────────────────────────
-# Abre ventana tmux si está disponible, fallback a background process.
+# ─── Hook: launch en tmux (fallback a background) ─────────────────────────────
 
 if command -v tmux &>/dev/null && tmux info &>/dev/null 2>&1; then
   tmux new-window -n "$WINDOW_NAME" "bash '$SCRIPT_FILE'"
@@ -112,9 +162,8 @@ while ! grep -q "$SENTINEL" "$OUTFILE" 2>/dev/null; do
   fi
 done
 
-# ─── Output (sin sentinel) ────────────────────────────────────────────────────
+# ─── Output (sin sentinel ni contexto interno) ────────────────────────────────
 
 grep -v "$SENTINEL" "$OUTFILE"
 
-# Cleanup parcial (OUTFILE se deja en /tmp por si quieres revisar)
 rm -f "$PROMPT_FILE" "$SCRIPT_FILE"

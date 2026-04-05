@@ -71,28 +71,19 @@ function setupTmuxPane() {
       return true; // ya existe, nada que hacer
     }
 
-    // Iniciar opencode server en background antes de abrir el pane
-    const senderScript = path.join(PLUGIN_ROOT, "scripts", "opencode-send.mjs");
-    if (fs.existsSync(senderScript)) {
-      spawn("node", [senderScript, "ensure-server"], {
-        detached: true,
-        stdio: "ignore",
-      }).unref();
-    }
+    // Crear split-pane horizontal (lado derecho) — oc-team-ui.sh (logo + monitor, sin opencode TUI)
+    const uiScript = path.join(PLUGIN_ROOT, "scripts", "oc-team-ui.sh");
+    const paneCmd = fs.existsSync(uiScript) ? `bash "${uiScript}"` : `bash --login`;
 
-    // Crear split-pane horizontal (lado derecho) — opencode TUI o fallback
-    const paneCmd = [
-      "echo '⚡ swarm-code | oc-team ready' &&",
-      "(opencode 2>/dev/null || echo 'opencode no disponible — corre: swarm-code:init')",
-      "&& read -p 'Press Enter to close'",
-    ].join(" ");
-
-    execSync(
-      `${tmux} split-window -h -t ${currentWindow} ${JSON.stringify(paneCmd)}`,
+    const ccPane = process.env.TMUX_PANE;
+    const splitTarget = ccPane ? `-t ${ccPane}` : `-t ${currentWindow}`;
+    const newPaneId = execSync(
+      `${tmux} split-window -h -d ${splitTarget} -P -F '#{pane_id}' ${paneCmd}`,
       { encoding: "utf8" }
-    );
-    execSync(`${tmux} select-pane -T "oc-team"`, { encoding: "utf8" });
-    execSync(`${tmux} select-pane -l`, { encoding: "utf8" }); // regresa al pane original
+    ).trim();
+    if (newPaneId) {
+      execSync(`${tmux} select-pane -T "oc-team" -t '${newPaneId}'`, { encoding: "utf8" });
+    }
 
     return true;
   } catch (err) {

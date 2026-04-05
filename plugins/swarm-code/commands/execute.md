@@ -55,17 +55,27 @@ Before running:
 - Enrich the prompt with code snippets, file paths, error details
 - Don't forward raw user messages — always add context
 
-**ALWAYS use the bridge — it opens a real tmux window so the user sees the team working:**
+**ALWAYS use the bridge — it opens a real tmux window (independent team) and sends results back:**
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh" "<enriched task with context>"
 ```
 
-The bridge will:
-1. Start/reuse the OpenCode server
-2. Open a **new tmux window** named `oc-team` with `opencode attach` (user sees TUI live)
-3. Send the task via HTTP API
-4. Fall back to runner if HTTP fails
+The bridge runs **non-blocking**:
+1. Starts/reuses OpenCode server
+2. Opens **new tmux window `oc-team`** — user sees live TUI, can interact independently
+3. Sends task via HTTP API in background
+4. Returns immediately with JSON: `{"job":"<id>","notify":"/tmp/oc-notify-<id>.md",...}`
+
+**After launching, Claude (lead) reads the notify file when the task completes:**
+```bash
+cat /tmp/oc-notify-<job-id>.md
+```
+
+Or poll with:
+```bash
+ls /tmp/oc-notify-*.md 2>/dev/null | tail -1 | xargs cat
+```
 
 ## Progress output (stderr)
 

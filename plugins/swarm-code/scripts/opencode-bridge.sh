@@ -127,15 +127,30 @@ open_attach_pane() {
 
 open_attach_pane "$OC_URL"
 
-# ─── Send message via HTTP API ────────────────────────────────────────────
+# ─── Send message via HTTP API (background — non-blocking) ──────────────────
+# The tmux window is the live view; result also goes to a notify file for the lead.
+
+NOTIFY_FILE="/tmp/oc-notify-${JOB_ID}.md"
 
 printf '\033[2m⚡ opencode [%s] → %s\033[0m\n' "$CMD" "$OC_URL" >&2
+printf '\033[2m  Result will be written to: %s\033[0m\n' "$NOTIFY_FILE" >&2
 
-if node "$SENDER" send "$PROMPT_FILE" > "$OUTFILE" 2>&1; then
-  cat "$OUTFILE"
-else
-  printf '\033[33m⚠ HTTP send failed — falling back to runner\033[0m\n' >&2
-  node "$RUNNER" "$CMD" "$(cat "$PROMPT_FILE")"
-fi
+(
+  if node "$SENDER" send "$PROMPT_FILE" > "$OUTFILE" 2>&1; then
+    {
+      printf '## oc-team result [job:%s]\n\n' "$JOB_ID"
+      cat "$OUTFILE"
+      printf '\n\n---\n_Task completed. Job: %s_\n' "$JOB_ID"
+    } > "$NOTIFY_FILE"
+    printf '\033[32m  ✓ oc-team done → %s\033[0m\n' "$NOTIFY_FILE" >&2
+  else
+    printf '\033[33m⚠ HTTP send failed — falling back to runner\033[0m\n' >&2
+    node "$RUNNER" "$CMD" "$(cat "$PROMPT_FILE")" > "$OUTFILE" 2>&1
+    cat "$OUTFILE" > "$NOTIFY_FILE"
+  fi
+  rm -f "$PROMPT_FILE" "$OUTFILE"
+) &
 
-rm -f "$PROMPT_FILE" "$OUTFILE"
+# Print job info immediately so Claude (lead) knows the task is running
+printf '{"job":"%s","notify":"%s","url":"%s","session":"%s","status":"running"}\n' \
+  "$JOB_ID" "$NOTIFY_FILE" "$OC_URL" "$OC_SID"

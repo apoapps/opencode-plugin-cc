@@ -121,8 +121,9 @@ OUTFILE="/tmp/oc-${JOB_ID}.out"
 PROMPT_FILE="/tmp/oc-${JOB_ID}.prompt"
 SCRIPT_FILE="/tmp/oc-${JOB_ID}.sh"
 SENTINEL="__OC_DONE_${JOB_ID}__"
-WINDOW_NAME="oc:${CMD}"
+PANE_TITLE="oc:${CMD}"
 MAX_WAIT=300
+TMUX_BIN="$(command -v tmux 2>/dev/null || echo /opt/homebrew/bin/tmux)"
 
 # Escribir prompt enriquecido (context + user prompt) al archivo
 inject_system_context "$CMD" "$PROMPT" > "$PROMPT_FILE"
@@ -132,20 +133,23 @@ inject_system_context "$CMD" "$PROMPT" > "$PROMPT_FILE"
 cat > "$SCRIPT_FILE" << RUNNER_EOF
 #!/usr/bin/env bash
 FULL_PROMPT=\$(cat "$PROMPT_FILE")
-echo ""
+printf "\033[1;36m⚡ opencode [%s]\033[0m\n" "$CMD"
+printf "\033[2m%s\033[0m\n\n" "$(date '+%H:%M:%S')"
 node "$RUNNER" $CMD "\$FULL_PROMPT" 2>&1 | tee "$OUTFILE"
-echo ""
 echo "$SENTINEL" >> "$OUTFILE"
-printf "\n─────────────────────────────────────\n"
-printf "✓ OpenCode listo  [%s]  Enter para cerrar.\n" "$CMD"
-read
+printf "\n\033[1;32m✓ done [%s]\033[0m\n" "$CMD"
+sleep 3
 RUNNER_EOF
 chmod +x "$SCRIPT_FILE"
 
-# ─── Hook: launch en tmux (fallback a background) ─────────────────────────────
+# ─── Hook: launch en tmux split-pane (fallback a background) ──────────────────
 
-if command -v tmux &>/dev/null && tmux info &>/dev/null 2>&1; then
-  tmux new-window -n "$WINDOW_NAME" "bash '$SCRIPT_FILE'"
+if [[ -n "${TMUX:-}" ]] && "$TMUX_BIN" info &>/dev/null 2>&1; then
+  # Split current window vertically — pane lives below, auto-closes when done
+  "$TMUX_BIN" split-window -v -l 35% "bash '$SCRIPT_FILE'"
+elif "$TMUX_BIN" info &>/dev/null 2>&1; then
+  # Inside a tmux session but TMUX var not set — new window fallback
+  "$TMUX_BIN" new-window -n "$PANE_TITLE" "bash '$SCRIPT_FILE'"
 else
   bash "$SCRIPT_FILE" &>/dev/null &
 fi

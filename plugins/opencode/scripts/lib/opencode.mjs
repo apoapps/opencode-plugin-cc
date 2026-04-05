@@ -80,6 +80,9 @@ export function resolveModel(priorityList, availableModels) {
 }
 
 function runCommand(cmd, args, options = {}) {
+  // When running inside tmux, stream stdout live to the pane so progress is visible.
+  const streamLive = Boolean(process.env.TMUX);
+
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -90,8 +93,14 @@ function runCommand(cmd, args, options = {}) {
 
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (streamLive) process.stdout.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (streamLive) process.stderr.write(chunk);
+    });
 
     child.on("error", reject);
     child.on("close", (code) => {

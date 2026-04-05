@@ -67,26 +67,8 @@ if (tool_name === "Agent") {
     process.exit(0);
   }
 
-  // Agent genérico sin team con prompt largo → bloquear + sugerir teams
-  if (!hasTeam && !isWorker) {
-    const promptLen = (tool_input?.prompt ?? "").length;
-    if (promptLen > 200) {
-      const agentDesc = tool_input?.description ?? "análisis";
-      const reason = [
-        `[swarm-code] BLOQUEADO: para tareas analíticas usa agent teams.`,
-        ``,
-        `En lugar de Agent sin team, usa:`,
-        `  TeamCreate(team_name="oc-team", description="${agentDesc}")`,
-        `  Agent(subagent_type="swarm-code:opencode-worker", team_name="oc-team", ...)`,
-        ``,
-        `O si es una tarea simple, usa el bridge directamente:`,
-        `  ${BRIDGE} "<prompt>"`,
-      ].join("\n");
-
-      console.log(JSON.stringify({ decision: "block", reason }));
-      process.exit(0);
-    }
-  }
+  // Agent genérico sin team — permitir, solo hint si es opencode-worker
+  // No bloquear agents normales, solo workers sin team
 
   process.exit(0);
 }

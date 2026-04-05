@@ -53,58 +53,20 @@ function findTmux() {
 }
 
 function setupTmuxPane() {
-  if (!process.env.TMUX) return false; // no tmux → skip silently
-
-  const tmux = findTmux();
-
-  try {
-    // ¿Ya existe un pane con título oc-team en la ventana actual?
-    const currentWindow = execSync(`${tmux} display-message -p '#{window_id}'`, {
-      encoding: "utf8",
-    }).trim();
-
-    const panes = execSync(`${tmux} list-panes -t ${currentWindow} -F '#{pane_title}'`, {
-      encoding: "utf8",
-    });
-
-    if (panes.split("\n").some((t) => t.trim() === "oc-team")) {
-      return true; // ya existe, nada que hacer
-    }
-
-    // Crear split-pane horizontal (lado derecho) — oc-team-ui.sh (logo + monitor, sin opencode TUI)
-    const uiScript = path.join(PLUGIN_ROOT, "scripts", "oc-team-ui.sh");
-    const paneCmd = fs.existsSync(uiScript) ? `bash "${uiScript}"` : `bash --login`;
-
-    const ccPane = process.env.TMUX_PANE;
-    const splitTarget = ccPane ? `-t ${ccPane}` : `-t ${currentWindow}`;
-    const newPaneId = execSync(
-      `${tmux} split-window -h -d ${splitTarget} -P -F '#{pane_id}' ${paneCmd}`,
-      { encoding: "utf8" }
-    ).trim();
-    if (newPaneId) {
-      execSync(`${tmux} select-pane -T "oc-team" -t '${newPaneId}'`, { encoding: "utf8" });
-    }
-
-    return true;
-  } catch (err) {
-    // No fallar si tmux no coopera — solo silencioso
-    process.stderr.write(`[swarm-code] tmux setup skipped: ${err.message}\n`);
-    return false;
-  }
+  // No-op on startup — pane only opens when user runs /swarm-code:init
+  return false;
 }
 
 // ─── Version banner ───────────────────────────────────────────────────
 // Claude lee esto como contexto de sistema al inicio de cada sesión.
 // Contiene las reglas y constraints que DEBEN respetarse.
 
-function printVersionBanner(paneCreated) {
+function printVersionBanner(_paneCreated) {
   const version = getVersion();
   const inTmux = !!process.env.TMUX;
   const tmuxStatus = inTmux
-    ? paneCreated
-      ? "✓ tmux activo · oc-team pane listo"
-      : "✓ tmux activo · oc-team pane ya existía"
-    : "✗ tmux REQUERIDO — bridge fallará";
+    ? "tmux activo · corre /swarm-code:init para activar oc-team"
+    : "sin tmux · /swarm-code:init lo detectará";
 
   const banner = [
     "",

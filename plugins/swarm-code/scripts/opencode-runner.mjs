@@ -1009,8 +1009,8 @@ async function handleInit(flags) {
       const panes = execSync(`tmux list-panes ${paneTarget} -F '#{pane_title}' 2>/dev/null`, { encoding: "utf8" }).trim().split("\n");
       if (!panes.includes("oc-team")) {
         const splitTarget = ccPane ? `-t ${ccPane}` : "";
-        // Run splash script directly — shows logo then exec opencode TUI
-        const splashScript = new URL("./opencode-splash.sh", import.meta.url).pathname;
+        // Run oc-team UI script — shows logo + tails job log (no opencode TUI)
+        const splashScript = new URL("./oc-team-ui.sh", import.meta.url).pathname;
         const splashCmd = fs.existsSync(splashScript) ? `bash "${splashScript}"` : `bash --login`;
         const newPaneId = execSync(
           `tmux split-window -h -d ${splitTarget} -P -F '#{pane_id}' ${splashCmd} 2>/dev/null`,

@@ -115,8 +115,14 @@ OC_SID="$(echo "$SERVER_STATE" | node -e "const s=JSON.parse(require('fs').readF
 # ─── Abrir opencode attach como split-pane dentro de la sesión actual ────────
 # NUNCA crea ventanas nuevas. Solo split-pane horizontal en la ventana actual.
 
+SHARED_LOG="${CLAUDE_PLUGIN_DATA:-/tmp}/swarm-code-logs/oc-team.log"
+mkdir -p "$(dirname "$SHARED_LOG")"
+
+log_to_pane() {
+  printf '%s\n' "$1" >> "$SHARED_LOG"
+}
+
 open_attach_pane() {
-  local url="$1"
   local current_window
   current_window="$("$TMUX_BIN" display-message -p '#{window_id}' 2>/dev/null)"
 
@@ -125,21 +131,22 @@ open_attach_pane() {
   pane_exists="$("$TMUX_BIN" list-panes -t "$current_window" -F '#{pane_title}' 2>/dev/null | grep -c "^oc-team$" || true)"
 
   if [[ "$pane_exists" -gt 0 ]]; then
-    # Ya existe — no hacer nada
-    printf '\033[2m  ✓ oc-team pane ya activo\033[0m\n' >&2
+    # Ya existe — anunciar job en el shared log (oc-team-ui.sh lo muestra)
+    log_to_pane ""
+    log_to_pane "$(printf '\033[38;5;221m  ⚡ job %s starting...\033[0m' "$JOB_ID")"
+    printf '\033[2m  ✓ oc-team pane activo — job anunciado\033[0m\n' >&2
     return
   fi
 
-  # Crear split horizontal en la ventana actual (lado derecho)
-  if "$TMUX_BIN" split-window -h -t "$current_window" \
-    "bash '$SCRIPTS_DIR/opencode-splash.sh' '$url' '$JOB_ID'; read -p 'Press Enter to close'" 2>/dev/null; then
-    "$TMUX_BIN" select-pane -T "oc-team" 2>/dev/null || true
-    "$TMUX_BIN" select-pane -l 2>/dev/null || true  # volver al pane original
-    printf '\033[2m  ✓ oc-team split-pane creado (derecha)\033[0m\n' >&2
+  # No existe — crear con oc-team-ui.sh (logo + tail log, sin opencode TUI)
+  local ui_script="$SCRIPTS_DIR/oc-team-ui.sh"
+  local pane_cmd
+  pane_cmd="${ui_script:-bash --login}"
+  if "$TMUX_BIN" split-window -h -d -t "$current_window" -P -F '#{pane_id}' "bash '$pane_cmd'" 2>/dev/null | xargs -I{} "$TMUX_BIN" select-pane -T "oc-team" -t {} 2>/dev/null; then
+    log_to_pane "$(printf '\033[38;5;221m  ⚡ job %s starting...\033[0m' "$JOB_ID")"
+    printf '\033[2m  ✓ oc-team split-pane creado\033[0m\n' >&2
   else
-    printf '\033[31m✗ No se pudo crear split-pane. Verifica que tmux tenga espacio suficiente.\033[0m\n' >&2
-    printf '\033[31m  Puedes correr manualmente: opencode attach %s\033[0m\n' "$url" >&2
-    exit 1
+    printf '\033[33m⚠ No se pudo crear oc-team pane — continuando sin TUI\033[0m\n' >&2
   fi
 }
 
@@ -195,6 +202,14 @@ printf '\033[2m  Result will be written to: %s\033[0m\n' "$NOTIFY_FILE" >&2
       cat "$source_file"
       printf '\n\n---\n_Task completed. Job: %s · DONE:%s_\n' "$JOB_ID" "$JOB_ID"
     } > "$NOTIFY_FILE"
+    # También escribir al shared log para que oc-team-ui.sh lo muestre en tiempo real
+    {
+      printf '\033[38;5;114m  ✓ job %s done\033[0m\n' "$JOB_ID"
+      printf '\033[2m'
+      cat "$source_file" | head -50
+      printf '\033[0m'
+      printf '\033[38;5;240m  ────────────────────────────────────────────────\033[0m\n'
+    } >> "$SHARED_LOG"
     printf '\033[32m  ✓ oc-team done [DONE:%s] → %s\033[0m\n' "$JOB_ID" "$NOTIFY_FILE" >&2
   }
 

@@ -55,9 +55,17 @@ Before running:
 - Enrich the prompt with code snippets, file paths, error details
 - Don't forward raw user messages — always add context
 
+**ALWAYS use the bridge — it opens a real tmux window so the user sees the team working:**
+
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-runner.mjs" execute "<enriched task with context>"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh" "<enriched task with context>"
 ```
+
+The bridge will:
+1. Start/reuse the OpenCode server
+2. Open a **new tmux window** named `oc-team` with `opencode attach` (user sees TUI live)
+3. Send the task via HTTP API
+4. Fall back to runner if HTTP fails
 
 ## Progress output (stderr)
 

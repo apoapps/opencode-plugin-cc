@@ -97,23 +97,26 @@ open_attach_pane() {
   # ── Case 1: Inside a tmux session ($TMUX is set) ──
   if [[ -n "${TMUX:-}" ]]; then
     local already
-    already="$("$TMUX_BIN" list-panes -F '#{pane_current_command}' 2>/dev/null | grep -c "opencode" || true)"
+    already="$("$TMUX_BIN" list-windows -F '#{window_name}' 2>/dev/null | grep -c "oc-team" || true)"
     if [[ "$already" -eq 0 ]]; then
-      # Try split-window first; if it fails (e.g., pane too small), try new-window
-      if ! "$TMUX_BIN" split-window -v -l 35% "opencode attach '$url'" 2>/dev/null; then
-        "$TMUX_BIN" new-window -n "oc-tui" "opencode attach '$url'" 2>/dev/null || \
-          printf '\033[2m  ℹ tmux split failed — view output: opencode attach %s\033[0m\n' "$url" >&2
-      fi
+      # New window for the team — user can switch to it with prefix+n
+      "$TMUX_BIN" new-window -n "oc-team" "opencode attach '$url'; read -p 'Press Enter to close'" 2>/dev/null || \
+        printf '\033[2m  ℹ tmux open failed — run: opencode attach %s\033[0m\n' "$url" >&2
+      printf '\033[2m  ✓ tmux window [oc-team] opened — switch with prefix+n\033[0m\n' >&2
     fi
     return
   fi
 
   # ── Case 2: Not inside tmux but tmux server is reachable ──
   if "$TMUX_BIN" info &>/dev/null 2>&1; then
+    # Find the first available session to attach the new window to
+    local first_session
+    first_session="$("$TMUX_BIN" list-sessions -F '#{session_name}' 2>/dev/null | head -1)"
     local existing_windows
-    existing_windows="$("$TMUX_BIN" list-windows -a -F '#{window_name}' 2>/dev/null | grep -c "oc-tui" || true)"
-    if [[ "$existing_windows" -eq 0 ]]; then
-      "$TMUX_BIN" new-window -n "oc-tui" "opencode attach '$url'" 2>/dev/null || true
+    existing_windows="$("$TMUX_BIN" list-windows -a -F '#{window_name}' 2>/dev/null | grep -c "oc-team" || true)"
+    if [[ "$existing_windows" -eq 0 ]] && [[ -n "$first_session" ]]; then
+      "$TMUX_BIN" new-window -t "$first_session" -n "oc-team" "opencode attach '$url'; read -p 'Press Enter to close'" 2>/dev/null || true
+      printf '\033[2m  ✓ tmux window [oc-team] opened in session: %s\033[0m\n' "$first_session" >&2
     fi
     return
   fi

@@ -65,21 +65,17 @@ function printVersionBanner(_paneCreated) {
   const version = getVersion();
   const inTmux = !!process.env.TMUX;
   const tmuxStatus = inTmux
-    ? "tmux activo · corre /swarm-code:init para activar oc-team"
-    : "sin tmux · /swarm-code:init lo detectará";
+    ? "tmux active · run /swarm-code:init to open oc-team pane"
+    : "no tmux · run /swarm-code:init when ready";
 
   const banner = [
     "",
     `[swarm-code v${version}] ${tmuxStatus}`,
     ``,
-    `REGLAS OBLIGATORIAS (enforced por hooks — no opcionales):`,
-    `  1. opencode-worker SIEMPRE en agent team: TeamCreate → Agent(team_name=...)`,
-    `  2. Workers comunican via SendMessage — nunca parallel agents sueltos`,
-    `  3. Bridge en tmux split-pane — nunca new-window (auto-creado al iniciar)`,
-    `  4. Skill opencode-orchestrate → PRIMERA acción es llamar el bridge`,
-    `  5. Análisis pesado en Bash → BLOQUEADO → usa el bridge`,
+    `To delegate a task to OpenCode (saves 70-80% tokens):`,
+    `  Agent(subagent_type="swarm-code:opencode-worker", model="haiku", prompt="<task>")`,
     ``,
-    `BRIDGE: bash "\${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh" "<prompt>"`,
+    `Worker runs: opencode run --model <model> "<prompt>"  (no tmux, no server needed)`,
     "",
   ].join("\n");
 

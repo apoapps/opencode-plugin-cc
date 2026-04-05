@@ -1,29 +1,15 @@
 #!/usr/bin/env node
 /**
- * pre-tool-use.mjs — PreToolUse guardrail hook (v2.2.0)
+ * pre-tool-use.mjs — PreToolUse guardrail hook (v3.0.0)
  *
- * BLOQUEA por defecto (no hint). Opt-out con SWARM_DELEGATE=0.
- *
- * Guardrails:
- *  1. Agent sin team_name                → BLOCK siempre
- *  2. opencode-worker sin team_name      → BLOCK siempre + código exacto corregido
- *  3. Bash análisis pesado               → BLOCK por defecto + bridge command exacto
- *
- * Opt-out:
- *  SWARM_DELEGATE=0  → pasa todo sin interceptar
+ * Minimal: only hints when opencode-worker is spawned without model: "haiku".
+ * No Bash blocking. No team_name enforcement.
  *
  * Made by Alejandro Apodaca Cordova (apoapps.com)
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PLUGIN_ROOT = path.resolve(__dirname, "..");
-const BRIDGE = `bash "\${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh"`;
-
-// ─── Read hook input ──────────────────────────────────────────────────
 let toolData = {};
 try {
   const raw = readFileSync("/dev/stdin", { encoding: "utf8", flag: "r" });
@@ -32,86 +18,24 @@ try {
 
 const { tool_name, tool_input } = toolData;
 
-// Opt-out global
+// Opt-out
 if (process.env.SWARM_DELEGATE === "0") process.exit(0);
 
-// ═══════════════════════════════════════════════════════════════════════
-// GUARDRAIL 1 — Agent tool
-// ═══════════════════════════════════════════════════════════════════════
-if (tool_name === "Agent") {
-  const subtype = tool_input?.subagent_type ?? "";
-  const hasTeam  = !!tool_input?.team_name;
-  const isWorker = subtype.includes("opencode-worker");
+// Only intercept Agent tool
+if (tool_name !== "Agent") process.exit(0);
 
-  // opencode-worker sin team → SIEMPRE bloqueado con corrección exacta
-  if (isWorker && !hasTeam) {
-    const teamName = tool_input?.name?.replace(/worker[-_]?/, "").replace(/\d+$/, "").trim() || "oc-team";
-    const workerName = tool_input?.name ?? "worker-1";
-    const reason = [
-      `[swarm-code] BLOQUEADO: opencode-worker DEBE estar en un agent team.`,
-      ``,
-      `Corrige así:`,
-      ``,
-      `  TeamCreate(team_name="${teamName}", description="...")`,
-      `  Agent(`,
-      `    subagent_type="swarm-code:opencode-worker",`,
-      `    name="${workerName}",`,
-      `    team_name="${teamName}",   ← OBLIGATORIO`,
-      `    prompt="<tarea> — reporta via SendMessage al team-lead"`,
-      `  )`,
-      ``,
-      `El hook bloqueará cualquier opencode-worker sin team_name.`,
-    ].join("\n");
+const subtype = tool_input?.subagent_type ?? "";
+const model   = tool_input?.model ?? "";
 
-    console.log(JSON.stringify({ decision: "block", reason }));
-    process.exit(0);
-  }
+// Hint (not block): opencode-worker should use model: "haiku"
+if (subtype.includes("opencode-worker") && model && model !== "haiku") {
+  const hint = [
+    `[swarm-code] Hint: opencode-worker runs best with model="haiku" (cheaper, faster).`,
+    `You passed model="${model}". Proceeding anyway.`,
+  ].join("\n");
 
-  // Agent genérico sin team — permitir, solo hint si es opencode-worker
-  // No bloquear agents normales, solo workers sin team
-
-  process.exit(0);
+  // Pass through — just print hint to stderr so Claude sees it
+  process.stderr.write(hint + "\n");
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// GUARDRAIL 2 — Bash análisis pesado → redirect al bridge
-// ═══════════════════════════════════════════════════════════════════════
-if (tool_name !== "Bash") process.exit(0);
-
-const cmd  = tool_input?.command ?? "";
-const desc = tool_input?.description ?? "";
-
-// Solo intercept si opencode está configurado
-const configPath       = path.join(process.cwd(), ".opencode", "config.json");
-const globalConfigPath = path.join(process.env.HOME ?? "", ".opencode", "config.json");
-if (!existsSync(configPath) && !existsSync(globalConfigPath)) process.exit(0);
-
-const HEAVY_PATTERNS = [
-  /\b(find|grep|rg)\b.*-r.{5,}/,          // búsqueda recursiva
-  /\bwc\b.*-l\b/,                           // conteo de líneas
-  /\|.*\|.*\|/,                             // pipelines de 3+ comandos
-  /\b(analiz[ae]|audit|benchmark|profile|investigat)\b/i,
-  /for .+ in \$\(.*\).*do/,                 // loops de análisis
-  /\b(awk|sed)\b.{20,}/,                    // awk/sed complejos
-];
-
-const isHeavy = HEAVY_PATTERNS.some((p) => p.test(cmd) || p.test(desc));
-if (!isHeavy) process.exit(0);
-
-// Extraer descripción breve del comando para el bridge
-const taskHint = desc || cmd.slice(0, 80).replace(/\n/g, " ");
-
-const reason = [
-  `[swarm-code] BLOQUEADO: análisis pesado detectado — usa el bridge.`,
-  ``,
-  `En lugar de este Bash, corre:`,
-  `  ${BRIDGE} "${taskHint}"`,
-  ``,
-  `El bridge:`,
-  `  • Abre tmux split-pane automáticamente (pane ya existe desde SessionStart)`,
-  `  • Entrega resultado via notify file al terminar`,
-  `  • No gasta tokens de Claude en el análisis`,
-].join("\n");
-
-console.log(JSON.stringify({ decision: "block", reason }));
 process.exit(0);

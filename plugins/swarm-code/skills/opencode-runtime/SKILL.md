@@ -1,6 +1,6 @@
 ---
 name: opencode-runtime
-description: Internal helper contract for calling opencode-bridge from Claude Code subagents. Requires tmux active.
+description: Delegate a task to an OpenCode worker (Haiku subagent). No tmux required. Use for analysis, code review, planning, or any task where offloading saves Claude tokens.
 user-invocable: false
 ---
 
@@ -8,58 +8,51 @@ user-invocable: false
 
 # OpenCode Runtime
 
-Use only inside `swarm-code:opencode-worker` subagents.
+Spawn a Haiku subagent that runs OpenCode via bash. Use this when delegating a well-defined task saves tokens vs doing it yourself.
 
-> **REQUIRES tmux active.** If `$TMUX` is not set, the bridge exits with code 1.
-> The worker must verify this before calling the bridge.
+## How to delegate (the only thing you need to do)
 
-## Pre-flight check (required)
+Use the Agent tool with:
+- `subagent_type`: `"swarm-code:opencode-worker"`
+- `model`: `"haiku"`
+- `prompt`: your full task description (be specific — the worker has no context)
 
-```bash
-if [[ -z "${TMUX:-}" ]]; then
-  SendMessage(to: "team-lead", message: "✗ tmux not active — cannot run bridge")
-  exit
-fi
+Example:
+```
+Agent(
+  subagent_type="swarm-code:opencode-worker",
+  model="haiku",
+  prompt="Review the auth middleware in src/middleware/auth.ts for security issues. List findings as: [SEVERITY] file:line — description."
+)
 ```
 
-## Minimal interface
+The Haiku agent will:
+1. ACK via SendMessage
+2. Run `oc-run.sh` which calls `opencode run --model <model> "<prompt>"`
+3. Stream colored progress to `/tmp/swarm-code-logs/oc-team.log` (visible in oc-team pane if tmux active)
+4. Return the result via SendMessage
 
-Only the prompt is required. Everything else is automatic:
+## When to use
 
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh" "<prompt>"
+- Code review, analysis, or architectural planning with clear scope
+- Tasks over ~200 words of context that don't need live file edits
+- Offloading repetitive analysis work (linting patterns, summarizing logs, etc.)
+
+## When NOT to use
+
+- Tasks requiring iterative file editing — do those yourself
+- Tasks where you need intermediate results to proceed
+- Simple lookups or questions you can answer immediately
+
+## No tmux required
+
+The oc-team split-pane is **optional eye candy**. The worker runs fine without it.
+If tmux is active and `/swarm-code:init` was run, colored logs appear in the oc-team pane automatically.
+
+## Model setup
+
+Models are configured once via:
 ```
-
-## What the bridge does automatically
-
-| Step | What | How |
-|------|------|-----|
-| **tmux check** | Fails if not in a tmux session | Checks `$TMUX` on startup |
-| **Task type** | Detects ask / review / plan | Keyword analysis of the prompt |
-| **Model** | Picks from project config | Reads modelPriority, dynamic fallback |
-| **Visibility** | Writes to shared log → oc-team pane | Real-time output via `tail -f` |
-| **Output** | Writes to notify file | Signals team-lead with DONE:JOB_ID |
-
-## Type override (only when needed)
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh" --type review "<prompt>"
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh" --type plan   "<prompt>"
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-bridge.sh" --type ask    "<prompt>"
+/swarm-code:init
 ```
-
-## Model setup (once per project)
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-runner.mjs" init
-```
-
-Detects all available models in your OpenCode installation and saves the priority list.
-
-## What NOT to do from the worker
-
-- Don't read files (use Read/Grep in the main agent)
-- Don't write files
-- Don't call `status`, `result`, or `setup` from the worker
-- Don't pass `--model` to the bridge (the runner handles it)
-- Don't call the bridge without tmux active
+The worker picks the best available model from config. You can override by passing a model ID as the second argument to `oc-run.sh` inside the worker prompt.

@@ -1011,20 +1011,20 @@ async function handleInit(flags) {
     gitHash = execSync(`git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null`, { encoding: "utf8" }).trim();
   } catch { /* no git */ }
 
-  // ── Tmux detection + oc-team window ──
+  // ── Tmux detection + oc-team split pane ──
   const inTmux = !!process.env.TMUX;
   let tmuxLine = dim("not detected");
   if (inTmux) {
     try {
-      const windows = execSync("tmux list-windows -F '#{window_name}' 2>/dev/null", { encoding: "utf8" }).trim().split("\n");
-      if (!windows.includes("oc-team")) {
-        execSync("tmux new-window -n 'oc-team' 2>/dev/null", { encoding: "utf8" });
-        tmuxLine = ok("`oc-team` window created");
+      const panes = execSync("tmux list-panes -F '#{pane_title}' 2>/dev/null", { encoding: "utf8" }).trim().split("\n");
+      if (!panes.includes("oc-team")) {
+        execSync("tmux split-window -h -d 2>/dev/null; tmux select-pane -T 'oc-team' -t '{right}' 2>/dev/null", { encoding: "utf8" });
+        tmuxLine = ok("`oc-team` split pane created");
       } else {
-        tmuxLine = ok("`oc-team` window ready");
+        tmuxLine = ok("`oc-team` split pane ready");
       }
     } catch {
-      tmuxLine = warn("tmux detected, window creation failed");
+      tmuxLine = warn("tmux detected, split failed");
     }
   }
 

@@ -1019,6 +1019,17 @@ async function handleInit(flags) {
         if (newPaneId) {
           execSync(`tmux select-pane -T 'oc-team' -t '${newPaneId}' 2>/dev/null`, { encoding: "utf8" });
         }
+        // ── Activate keyword watcher on Claude Code's pane ──
+        // pipe-pane feeds CC pane output to watcher; _Gi=<id>;OK triggers opencode TUI
+        if (ccPane) {
+          const watcherScript = new URL("./oc-keyword-watcher.sh", import.meta.url).pathname;
+          if (fs.existsSync(watcherScript)) {
+            execSync(
+              `tmux pipe-pane -t '${ccPane}' "bash '${watcherScript}' '${ccPane}'" 2>/dev/null`,
+              { encoding: "utf8" }
+            );
+          }
+        }
         tmuxLine = ok("`oc-team` split pane created");
       } else {
         tmuxLine = ok("`oc-team` split pane ready");

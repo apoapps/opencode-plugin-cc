@@ -48,29 +48,39 @@ detect_type() {
 
 CMD="${TYPE_OVERRIDE:-$(detect_type "$PROMPT")}"
 
+# ─── Job ID + report paths ─────────────────────────────────────────────────
+
+JOB_ID="$(date +%s%3N)$(( RANDOM % 900 + 100 ))"
+PROMPT_FILE="/tmp/oc-${JOB_ID}.prompt"
+OUTFILE="/tmp/oc-${JOB_ID}.out"
+REPORT_FILE="/tmp/oc-report-${JOB_ID}.md"
+
 # ─── System prompt injection ───────────────────────────────────────────────
+# Every prompt includes the DONE protocol so the agent always reports back.
+
+_done_footer() {
+  printf '\n\n---\n[DONE PROTOCOL — MANDATORY]\nYou are a worker in the swarm-code team. Claude Code is the lead in another tmux session.\nWhen you finish your task:\n  1. Write your complete report to: %s\n  2. End the file with exactly (last line): DONE:%s\nDo NOT skip this. Claude reads this file to receive your output.\n' \
+    "$REPORT_FILE" "$JOB_ID"
+}
 
 inject_system_context() {
   local cmd="$1"
   local user_prompt="$2"
   case "$cmd" in
     plan)
-      printf '[SYSTEM — architect mode]\nProduce a clear implementation plan. No code. Steps + tradeoffs + files.\n\n[TASK]\n%s' "$user_prompt"
+      printf '[SYSTEM — architect mode]\nProduce a clear implementation plan. No code. Steps + tradeoffs + files.\n\n[TASK]\n%s%s' \
+        "$user_prompt" "$(_done_footer)"
       ;;
     review)
-      printf '[SYSTEM — code reviewer]\nFormat: - [SEVERITY] file:line — description. Max 12. CRITICAL first. No fixes.\n\n[CODE]\n%s' "$user_prompt"
+      printf '[SYSTEM — code reviewer]\nFormat: - [SEVERITY] file:line — description. Max 12. CRITICAL first. No fixes.\n\n[CODE]\n%s%s' \
+        "$user_prompt" "$(_done_footer)"
       ;;
     ask)
-      printf '[SYSTEM — subagent for Claude Code]\nConcise. No preamble. Bullets + file:line. 400 words max.\n\n[TASK]\n%s' "$user_prompt"
+      printf '[SYSTEM — subagent for Claude Code]\nConcise. No preamble. Bullets + file:line. 400 words max.\n\n[TASK]\n%s%s' \
+        "$user_prompt" "$(_done_footer)"
       ;;
   esac
 }
-
-# ─── Write enriched prompt to temp file ────────────────────────────────────
-
-JOB_ID="$(date +%s%3N)"
-PROMPT_FILE="/tmp/oc-${JOB_ID}.prompt"
-OUTFILE="/tmp/oc-${JOB_ID}.out"
 
 inject_system_context "$CMD" "$PROMPT" > "$PROMPT_FILE"
 
@@ -96,13 +106,31 @@ open_attach_pane() {
 
   # ── Case 1: Inside a tmux session ($TMUX is set) ──
   if [[ -n "${TMUX:-}" ]]; then
-    local already
-    already="$("$TMUX_BIN" list-windows -F '#{window_name}' 2>/dev/null | grep -c "oc-team" || true)"
-    if [[ "$already" -eq 0 ]]; then
-      # New window for the team — user can switch to it with prefix+n
-      "$TMUX_BIN" new-window -n "oc-team" "opencode attach '$url'; read -p 'Press Enter to close'" 2>/dev/null || \
-        printf '\033[2m  ℹ tmux open failed — run: opencode attach %s\033[0m\n' "$url" >&2
-      printf '\033[2m  ✓ tmux window [oc-team] opened — switch with prefix+n\033[0m\n' >&2
+    # Check if oc-team pane already exists in current window
+    local pane_exists
+    pane_exists="$("$TMUX_BIN" list-panes -F '#{pane_title}' 2>/dev/null | grep -c "^oc-team$" || true)"
+    # Also check if oc-team window exists elsewhere (to join as split)
+    local win_id
+    win_id="$("$TMUX_BIN" list-windows -a -F '#{window_index}:#{session_name}:#{window_name}' 2>/dev/null \
+      | grep ":oc-team$" | head -1 | cut -d: -f1)" || true
+
+    if [[ "$pane_exists" -eq 0 ]]; then
+      if [[ -n "$win_id" ]]; then
+        # oc-team exists as a window — join it as a horizontal split in current window
+        "$TMUX_BIN" join-pane -s ":${win_id}" -h 2>/dev/null && \
+          printf '\033[2m  ✓ oc-team joined as split pane\033[0m\n' >&2 || \
+          printf '\033[2m  ℹ join-pane failed — oc-team window available with prefix+n\033[0m\n' >&2
+      else
+        # No oc-team anywhere — create as horizontal split in current window
+        "$TMUX_BIN" split-window -h "bash '$SCRIPTS_DIR/opencode-splash.sh' '$url' '$JOB_ID'; read -p 'Press Enter to close'" 2>/dev/null && \
+          "$TMUX_BIN" select-pane -T "oc-team" 2>/dev/null && \
+          "$TMUX_BIN" select-pane -l 2>/dev/null && \
+          printf '\033[2m  ✓ oc-team split pane created (right side)\033[0m\n' >&2 || \
+          # Fallback: new window
+          { "$TMUX_BIN" new-window -n "oc-team" "bash '$SCRIPTS_DIR/opencode-splash.sh' '$url' '$JOB_ID'; read -p 'Press Enter to close'" 2>/dev/null && \
+            printf '\033[2m  ✓ oc-team opened as new window (prefix+n to switch)\033[0m\n' >&2; } || \
+          printf '\033[2m  ℹ tmux open failed — run: opencode attach %s\033[0m\n' "$url" >&2
+      fi
     fi
     return
   fi
@@ -115,7 +143,7 @@ open_attach_pane() {
     local existing_windows
     existing_windows="$("$TMUX_BIN" list-windows -a -F '#{window_name}' 2>/dev/null | grep -c "oc-team" || true)"
     if [[ "$existing_windows" -eq 0 ]] && [[ -n "$first_session" ]]; then
-      "$TMUX_BIN" new-window -t "$first_session" -n "oc-team" "opencode attach '$url'; read -p 'Press Enter to close'" 2>/dev/null || true
+      "$TMUX_BIN" new-window -t "$first_session" -n "oc-team" "bash '$SCRIPTS_DIR/opencode-splash.sh' '$url' '$JOB_ID'; read -p 'Press Enter to close'" 2>/dev/null || true
       printf '\033[2m  ✓ tmux window [oc-team] opened in session: %s\033[0m\n' "$first_session" >&2
     fi
     return
@@ -158,7 +186,7 @@ printf '\033[2m  Result will be written to: %s\033[0m\n' "$NOTIFY_FILE" >&2
         local win_id
         win_id="$("$TMUX_BIN" list-windows -F '#{window_index}:#{window_name}' 2>/dev/null | grep ":oc-team" | cut -d: -f1 | head -1)"
         if [[ -n "$win_id" ]]; then
-          "$TMUX_BIN" respawn-window -t ":${win_id}" "opencode attach '$new_url'; read -p 'Press Enter to close'" 2>/dev/null || true
+          "$TMUX_BIN" respawn-window -t ":${win_id}" "bash '$SCRIPTS_DIR/opencode-splash.sh' '$new_url' '$JOB_ID'; read -p 'Press Enter to close'" 2>/dev/null || true
         else
           open_attach_pane "$new_url"
         fi
@@ -168,22 +196,37 @@ printf '\033[2m  Result will be written to: %s\033[0m\n' "$NOTIFY_FILE" >&2
     return 1
   }
 
-  if send_with_retry; then
+  build_notify() {
+    local source_file="$1"
+    local tag="$2"
     {
-      printf '## oc-team result [job:%s]\n\n' "$JOB_ID"
-      cat "$OUTFILE"
-      printf '\n\n---\n_Task completed. Job: %s_\n' "$JOB_ID"
+      printf '## oc-team result [job:%s] [%s]\n\n' "$JOB_ID" "$tag"
+      cat "$source_file"
+      printf '\n\n---\n_Task completed. Job: %s · DONE:%s_\n' "$JOB_ID" "$JOB_ID"
     } > "$NOTIFY_FILE"
-    printf '\033[32m  ✓ oc-team done → %s\033[0m\n' "$NOTIFY_FILE" >&2
+    printf '\033[32m  ✓ oc-team done [DONE:%s] → %s\033[0m\n' "$JOB_ID" "$NOTIFY_FILE" >&2
+  }
+
+  if send_with_retry; then
+    # Prefer the agent-written report file (contains DONE:<JOB_ID>) over HTTP response
+    if [[ -f "$REPORT_FILE" ]] && grep -q "DONE:${JOB_ID}" "$REPORT_FILE" 2>/dev/null; then
+      build_notify "$REPORT_FILE" "report"
+    else
+      build_notify "$OUTFILE" "http"
+    fi
   else
     printf '\033[33m⚠ HTTP send failed after retries — falling back to runner (no TUI)\033[0m\n' >&2
     node "$RUNNER" "$CMD" "$(cat "$PROMPT_FILE")" > "$OUTFILE" 2>&1
-    cat "$OUTFILE" > "$NOTIFY_FILE"
-    printf '\033[33m  ✓ runner fallback done → %s\033[0m\n' "$NOTIFY_FILE" >&2
+    # Check for report file even in fallback
+    if [[ -f "$REPORT_FILE" ]] && grep -q "DONE:${JOB_ID}" "$REPORT_FILE" 2>/dev/null; then
+      build_notify "$REPORT_FILE" "report-fallback"
+    else
+      build_notify "$OUTFILE" "runner-fallback"
+    fi
   fi
   rm -f "$PROMPT_FILE" "$OUTFILE"
 ) &
 
 # Print job info immediately so Claude (lead) knows the task is running
-printf '{"job":"%s","notify":"%s","url":"%s","session":"%s","status":"running"}\n' \
-  "$JOB_ID" "$NOTIFY_FILE" "$OC_URL" "$OC_SID"
+printf '{"job":"%s","notify":"%s","report":"%s","url":"%s","session":"%s","status":"running"}\n' \
+  "$JOB_ID" "$NOTIFY_FILE" "$REPORT_FILE" "$OC_URL" "$OC_SID"

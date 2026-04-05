@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# opencode-bridge.sh — bridge entre Claude Code y OpenCode
+# opencode-bridge.sh — DEPRECATED (v2.2+)
+# Replaced by oc-run.sh + Haiku agent pattern.
+# Kept for reference only — not called by any current flow.
 #
-# Arquitectura:
+# Original arquitectura:
 #   1. opencode serve  → servidor HTTP persistente (background, auto-start)
 #   2. opencode attach → TUI en split-pane tmux (pane dentro de la sesión actual)
 #   3. HTTP API        → Claude envía mensajes vía opencode-send.mjs

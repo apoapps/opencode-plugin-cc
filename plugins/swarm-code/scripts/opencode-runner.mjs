@@ -60,6 +60,17 @@ const C = {
 // Tells OpenCode it's a subagent — keep responses concise for Claude's validation pass
 const CC_HINT = `[CONTEXT: You are a subagent running inside Claude Code. Claude will read and validate your response — be maximally concise. No preamble, no "here is", no filler. Jump straight to findings. Use bullet points and file:line references. 400 words max unless the task genuinely requires more.]\n\n`;
 
+function buildPromptPrefix() {
+  const config = getConfig(CWD);
+  const profile = config.swarmProfile;
+  if (!profile) return CC_HINT;
+  const parts = [];
+  if (profile.goal) parts.push(`Project: ${profile.goal}`);
+  if (profile.dirs?.length) parts.push(`Dirs in scope: ${profile.dirs.join(", ")}`);
+  const profileCtx = parts.length > 0 ? `[PROJECT CONTEXT: ${parts.join(". ")}]\n` : "";
+  return CC_HINT + profileCtx;
+}
+
 // ─── Spinner helpers ──────────────────────────────────────────────────
 const SPIN_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
 const SPIN_PHRASES = ['tokenizando...','chambeando...','awanta...','dale gas...','procesando...','casi casi...','en chinga...','bebiendo tokens...'];
@@ -513,7 +524,7 @@ async function handleAsk(flags, positional) {
 
   const { models, source } = await resolveActiveModel(flags);
   const template = loadPrompt("ask");
-  const finalPrompt = CC_HINT + (template
+  const finalPrompt = buildPromptPrefix() + (template
     ? interpolate(template, { prompt, cwd: CWD })
     : prompt);
 
@@ -576,7 +587,7 @@ async function handleReview(flags) {
     diff ? `## Diff\n\`\`\`diff\n${diff.slice(0, 50000)}\n\`\`\`` : "",
   ].filter(Boolean).join("\n\n");
 
-  const finalPrompt = CC_HINT + (template
+  const finalPrompt = buildPromptPrefix() + (template
     ? interpolate(template, { context, cwd: CWD, base: base ?? "HEAD" })
     : `Review this code change and report issues by severity:\n\n${context}`);
 
@@ -619,7 +630,7 @@ async function handlePlan(flags, positional) {
 
   const { models } = await resolveActiveModel(flags);
   const template = loadPrompt("plan");
-  const finalPrompt = CC_HINT + (template
+  const finalPrompt = buildPromptPrefix() + (template
     ? interpolate(template, { prompt, cwd: CWD })
     : `Create a detailed implementation plan for:\n\n${prompt}`);
 
@@ -892,7 +903,7 @@ async function handleExecute(flags, positional) {
   const stopSpinner = startSpinner(tag);
 
   const template = loadPrompt("ask");
-  const finalPrompt = CC_HINT + (template
+  const finalPrompt = buildPromptPrefix() + (template
     ? interpolate(template, { prompt: task, cwd: CWD })
     : task);
 
@@ -985,6 +996,23 @@ async function handleInit(flags) {
     return handleTest(getConfig(CWD));
   }
 
+  // ── Save swarm profile (from init wizard) ──
+  if (flags["save-profile"]) {
+    try {
+      const profile = JSON.parse(flags["save-profile"]);
+      profile.configuredAt = profile.configuredAt ?? new Date().toISOString();
+      setConfig(CWD, { ...getConfig(CWD), swarmProfile: profile });
+      console.log(ok(`Swarm profile saved.`));
+      console.log(dim(`  Goal: ${profile.goal ?? "(none)"}`));
+      console.log(dim(`  Dirs: ${(profile.dirs ?? []).join(", ") || "(all)"}`));
+      console.log(dim(`  Tasks: ${(profile.tasks ?? []).join(", ") || "(all)"}`));
+    } catch (e) {
+      console.log(fail(`Invalid profile JSON: ${e.message}`));
+      process.exit(1);
+    }
+    return;
+  }
+
   // ── Version info ──
   let pluginVersion = "2.0.0";
   try {
@@ -1018,17 +1046,6 @@ async function handleInit(flags) {
         ).trim();
         if (newPaneId) {
           execSync(`tmux select-pane -T 'oc-team' -t '${newPaneId}' 2>/dev/null`, { encoding: "utf8" });
-        }
-        // ── Activate keyword watcher on Claude Code's pane ──
-        // pipe-pane feeds CC pane output to watcher; _Gi=<id>;OK triggers opencode TUI
-        if (ccPane) {
-          const watcherScript = new URL("./oc-keyword-watcher.sh", import.meta.url).pathname;
-          if (fs.existsSync(watcherScript)) {
-            execSync(
-              `tmux pipe-pane -t '${ccPane}' "bash '${watcherScript}' '${ccPane}'" 2>/dev/null`,
-              { encoding: "utf8" }
-            );
-          }
         }
         tmuxLine = ok("`oc-team` split pane created");
       } else {
@@ -1070,6 +1087,7 @@ async function handleInit(flags) {
       models: models.length,
       providers: Object.keys(grouped).length,
       tmux: inTmux,
+      swarmProfile: config.swarmProfile ?? null,
     }, true);
     return;
   }

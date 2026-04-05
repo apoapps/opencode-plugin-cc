@@ -1026,35 +1026,9 @@ async function handleInit(flags) {
     gitHash = execSync(`git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null`, { encoding: "utf8" }).trim();
   } catch { /* no git */ }
 
-  // ── Tmux detection + oc-team split pane (anchored to Claude Code's pane) ──
+  // ── Tmux detection (no auto-pane — user controls their layout) ──
   const inTmux = !!process.env.TMUX;
-  const ccPane = process.env.TMUX_PANE; // pane ID where Claude Code is running
-  let tmuxLine = dim("not detected");
-  if (inTmux) {
-    try {
-      // List panes only in the current window (Claude Code's window)
-      const paneTarget = ccPane ? `-t ${ccPane}` : "";
-      const panes = execSync(`tmux list-panes ${paneTarget} -F '#{pane_title}' 2>/dev/null`, { encoding: "utf8" }).trim().split("\n");
-      if (!panes.includes("oc-team")) {
-        const splitTarget = ccPane ? `-t ${ccPane}` : "";
-        // Run splash script — super splash on first init, then oc-team-ui.sh on subsequent
-        const splashScript = new URL("./opencode-splash.sh", import.meta.url).pathname;
-        const splashCmd = fs.existsSync(splashScript) ? `bash "${splashScript}"` : `bash --login`;
-        const newPaneId = execSync(
-          `tmux split-window -h -d ${splitTarget} -P -F '#{pane_id}' ${splashCmd} 2>/dev/null`,
-          { encoding: "utf8" }
-        ).trim();
-        if (newPaneId) {
-          execSync(`tmux select-pane -T 'oc-team' -t '${newPaneId}' 2>/dev/null`, { encoding: "utf8" });
-        }
-        tmuxLine = ok("`oc-team` split pane created");
-      } else {
-        tmuxLine = ok("`oc-team` split pane ready");
-      }
-    } catch {
-      tmuxLine = warn("tmux detected, split failed");
-    }
-  }
+  const tmuxLine = inTmux ? ok("detected") : dim("not detected");
 
   // ── OpenCode check ──
   const availability = await checkOpenCodeAvailable();

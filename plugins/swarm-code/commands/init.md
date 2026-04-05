@@ -111,18 +111,6 @@ Print a short, friendly summary:
 
 ---
 
-## Step 6 — Open oc-team pane (tmux only)
-
-If `tmux` is `true` in the JSON from Step 1:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/opencode-runner.mjs" init
-```
-
-This opens the oc-team split-pane with the ApoApps splash and real-time log tail.
-
----
-
 ## After init — Claude delegates automatically
 
 Once initialized, route tasks internally:

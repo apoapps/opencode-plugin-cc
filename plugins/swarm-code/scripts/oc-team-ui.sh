@@ -34,6 +34,4 @@ printf "${RESET}"
 printf "${DIM}                    made by Alejandro Apodaca · apoapps.com${RESET}\n"
 printf "\n  ${BOLD}${CYAN}swarm-code${RESET} ${GRAY}·${RESET} ${DIM}oc-team${RESET}\n"
 printf "${GRAY}  ──────────────────────────────────────────────────────${RESET}\n"
-printf "  ${DIM}${YELLOW}⏳ accepting jobs...${RESET}\n\n"
-
 exec tail -f "$SHARED_LOG"

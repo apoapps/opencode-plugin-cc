@@ -1,64 +1,16 @@
 {
-  "version": "1.0",
-  "hooks": [
-    {
-      "id": "implicit-command",
-      "name": "Implicit Command Detection",
-      "lifecycle": "SessionStart",
-      "file": "./implicit-command.mjs",
-      "enabled": true,
-      "description": "Convierte frases naturales en comandos /opencode:* (e.g., 'Revisa esto' → /opencode:review)"
-    },
-    {
-      "id": "pre-execution",
-      "name": "Pre-Execution Auto-Routing",
-      "lifecycle": "SessionStart",
-      "file": "./pre-execution.mjs",
-      "enabled": true,
-      "description": "Auto-detecta si el prompt debe delegarse a OpenCode. Usa el SmartRouter dinámico.",
-      "config": {
-        "enableAutoRouting": true,
-        "delegationScoreThreshold": 65
+  "description": "swarm-code hooks — SessionStart context + PostToolUse session capture",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/task-type.mjs\" SessionStart",
+            "timeout": 5
+          }
+        ]
       }
-    },
-    {
-      "id": "task-type",
-      "name": "Task Type Detector",
-      "lifecycle": "SessionStart",
-      "file": "./task-type.mjs",
-      "enabled": true,
-      "description": "Clasifica el prompt como ask/review/plan antes de enviarlo al bridge. Permite que el bridge reciba solo el prompt sin flags."
-    },
-    {
-      "id": "session-formatter",
-      "name": "Session Formatter",
-      "lifecycle": "ResponseComplete",
-      "file": "../scripts/session-hook.mjs",
-      "enabled": true,
-      "description": "Formatea la respuesta de OpenCode con headers de color, modelo usado y conteo de tokens"
-    }
-  ],
-  "ordering": [
-    "implicit-command",
-    "pre-execution",
-    "task-type",
-    "session-formatter"
-  ],
-  "config": {
-    "routing": {
-      "enableAutoRouting": true,
-      "delegationScoreThreshold": 65,
-      "budget": "auto"
-    },
-    "taskType": {
-      "autoDetect": true,
-      "reviewKeywords": ["git diff", "code review", "revisa", "review", "cambios", "pull request", "pr", "staged"],
-      "planKeywords": ["plan", "architect", "diseña", "implementa", "roadmap", "pasos para", "scaffold", "estructura de"]
-    },
-    "ui": {
-      "colors": true,
-      "emojis": true,
-      "verbosity": "normal"
-    }
+    ]
   }
 }

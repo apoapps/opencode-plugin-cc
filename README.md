@@ -1,3 +1,5 @@
+
+
 # swarm-code
 
 > **Agent swarm adapter for Claude Code + OpenCode.** Claude Code leads the swarm — OpenCode workers execute the analytical grunt work. Save 70-80% Claude tokens without sacrificing quality.
@@ -229,7 +231,7 @@ plugins/swarm-code/
 │   ├── opencode-result-handling/  # How Claude validates responses
 │   └── opencode-orchestrate/      # Multi-team swarm pattern guide
 ├── scripts/
-│   ├── opencode-bridge.sh         # Core job adapter
+│   ├── opencode-bridge.sh         # Deprecated — replaced by oc-run.sh
 │   ├── opencode-runner.mjs        # CLI wrapper + init logic
 │   ├── session-hook.mjs           # Startup hook (oc-team pane, no auto-opencode)
 │   ├── oc-team-ui.sh              # Monitor pane (logo + log tail)
